@@ -1,0 +1,149 @@
+name: "Deploy to App Store and Play Store"
+
+on:
+  workflow_call:
+    inputs:
+      key_filepath:
+        description: "Path to the key file for signing"
+        required: true
+        type: string
+    secrets:
+      SSH_PRIVATE_KEY:
+        description: "SSH private key for Match"
+        required: true
+      AUTHKEY:
+        description: "App Store Connect API Key"
+        required: true
+      MATCH_PASSWORD:
+        description: "Password for Fastlane Match"
+        required: true
+      PLAY_STORE_UPLOAD_KEY:
+        description: "Play Store Upload Key upload-keystore.jks"
+        required: true
+      STORE_PASSWORD:
+        description: "upload-keystore.jks Store Password"
+        required: true
+      KEY_PASSWORD:
+        description: "upload-keystore.jks Key Password"
+        required: true
+      KEY_ALIAS:
+        description: "upload-keystore.jks Key Alias"
+        required: true
+      PLAY_JSON_KEY_DATA:
+        description: "Play Store JSON Key Data"
+        required: true
+
+jobs:
+  deploy-to-app-store:
+    name: "Deploy to App Store"
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Xcode version
+        run: xcodebuild -showsdks
+
+      - name: Setup SSH key for Match
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: ios
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          cd ios
+          gem install bundler
+          bundle install
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install
+
+      - name: Create App Store Connect API Key file
+        run: |
+          cd ios
+          echo "${{ secrets.AUTHKEY }}" > ${{ inputs.key_filepath }}
+          chmod 600 ${{ inputs.key_filepath }}
+
+      - name: Set up code signing
+        run: |
+          cd ios
+          bundle exec fastlane match appstore --readonly
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+
+      - name: Build and upload to App Store
+        run: |
+          cd ios
+          bundle exec fastlane release
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+
+  deploy-play-store:
+    name: "Deploy to Play Store"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.PLAY_STORE_UPLOAD_KEY }}" | base64 --decode > android/upload-keystore.jks
+
+      - name: Create key.properties
+        run: |
+          echo "storeFile=../upload-keystore.jks" > android/key.properties
+          echo 'storePassword=${{ secrets.STORE_PASSWORD }}' >> android/key.properties
+          echo 'keyPassword=${{ secrets.KEY_PASSWORD }}' >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: android
+
+      - name: Download pub dependencies
+        run: flutter pub get
+
+      - name: Build AAB
+        run: flutter build appbundle
+
+      - name: Deploy to Play Store
+        env:
+          PLAY_JSON_KEY_DATA: ${{ secrets.PLAY_JSON_KEY_DATA }}
+        run: |
+          cd android
+          bundle install
+          bundle exec fastlane deploy_ci
