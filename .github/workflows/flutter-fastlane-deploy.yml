@@ -7,6 +7,16 @@ on:
         description: "Path to the key file for signing"
         required: true
         type: string
+      deploy_to_app_store:
+        description: "Whether to deploy to App Store"
+        required: false
+        type: boolean
+        default: true
+      deploy_to_play_store:
+        description: "Whether to deploy to Play Store"
+        required: false
+        type: boolean
+        default: true
     secrets:
       SSH_PRIVATE_KEY:
         description: "SSH private key for Match"
@@ -37,6 +47,7 @@ jobs:
   deploy-to-app-store:
     name: "Deploy to App Store"
     runs-on: macos-15
+    if: ${{ inputs.deploy_to_app_store }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -101,6 +112,7 @@ jobs:
   deploy-play-store:
     name: "Deploy to Play Store"
     runs-on: ubuntu-latest
+    if: ${{ inputs.deploy_to_play_store }}
 
     steps:
       - uses: actions/checkout@v4
